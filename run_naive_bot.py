@@ -2,6 +2,7 @@
 # Import #
 ##############################################################################
 
+from argparse import ArgumentParser
 import logging
 
 from flow.run_bot import run_naive_bot
@@ -21,9 +22,34 @@ logger = get_utc_logger(
 # Flows #
 ##############################################################################
 
-bot = BinanceNaiveBot(logger=logger, symbol="ADAUSDT")
-run_naive_bot(
-    bot=bot,
-)
+def get_args() -> ArgumentParser:
+    parser = ArgumentParser()
+    parser.add_argument(
+        '--min-wait', 
+        type=int,
+        default=60,
+        help='Minimum wait time between requests in milliseconds'
+    )
+    parser.add_argument(
+        '--max-wait', 
+        type=int,
+        default=300,
+        help='Maximum wait time between requests in milliseconds'
+    )
+    return parser.parse_args()
+
+##############################################################################
+
+if __name__ == "__main__":
+    args = get_args()
+    bot = BinanceNaiveBot(
+        logger=logger, 
+        symbol="ADAUSDT",
+        min_wait = args.min_wait,
+        max_wait = args.max_wait,
+    )
+    run_naive_bot(
+        bot=bot,
+    )
 
 ##############################################################################
