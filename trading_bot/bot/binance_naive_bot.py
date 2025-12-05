@@ -699,6 +699,7 @@ class BinanceNaiveBot(BinanceBot):
         leverage: int 
             default is 20
         """
+        leverage = self.leverage
         try:
             # Get the current position for the symbol
             positions_info = self.client.futures_position_information(symbol=symbol)
@@ -892,7 +893,7 @@ class BinanceNaiveBot(BinanceBot):
         sl_price = \
             entry_price * (1 - (sl_percent / 100)/leverage) if position_type == 'LONG' \
                 else entry_price * (1 + (sl_percent / 100)/leverage)
-        return round(tp_price, 2), round(sl_price, 2)
+        return round(tp_price, 4), round(sl_price, 4)
 
     ##########################################################################
     
