@@ -473,8 +473,7 @@ class BinanceNaiveBot(BinanceBot):
             # 1. Get position info
             # NOTE: In a real system, you should handle possible exceptions here (e.g., network error)
             position_info = self.client.futures_position_information(symbol=symbol)
-            print(position_info)
-            if (position_info is None) or position_info == []:
+            if (position_info is None) or (position_info == []) or (position_info[0]['positionAmt'] == '0'):
                 self.logger.info(f"No position information for {symbol}. Exiting trailing function.")
                 return
             roi = self.get_roi(symbol, position_info)  # ROI is returned in percentage
