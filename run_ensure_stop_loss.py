@@ -4,7 +4,6 @@
 
 import logging
 import time
-import requests
 
 from trading_bot.util.binance import check_weight_usage
 from trading_bot.bot.binance_naive_bot import BinanceNaiveBot   
@@ -19,18 +18,19 @@ logger = get_utc_logger(
     level=logging.DEBUG,
 )
 
-BASE_URL = "https://fapi.binance.com"
-
 ##########
 # Flows #
 ##############################################################################
 
 bot = BinanceNaiveBot(logger=logger, symbol="ADAUSDT")
 logger.info("Running profit trailing...")
-bot.profit_trailing(
-    "ADAUSDT"
+bot.check_and_create_stop_loss(
+    "ADAUSDT",
+    stop_loss_percent=3.0,
 )
 check_weight_usage()
+logger.info("Sleeping for 5 seconds.")
+time.sleep(5)
 print("#"*72)
 
 ##############################################################################
