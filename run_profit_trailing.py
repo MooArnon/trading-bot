@@ -19,18 +19,34 @@ logger = get_utc_logger(
     level=logging.DEBUG,
 )
 
-BASE_URL = "https://fapi.binance.com"
-
 ##########
 # Flows #
 ##############################################################################
 
-bot = BinanceNaiveBot(logger=logger, symbol="ADAUSDT")
-logger.info("Running profit trailing...")
-bot.profit_trailing(
-    "ADAUSDT"
-)
-check_weight_usage()
-print("#"*72)
+if __name__ == "__main__":
+    bot = BinanceNaiveBot(logger=logger, symbol="ADAUSDT")
+    logger.info("Running profit trailing...")
+    bot.profit_trailing(
+        "ADAUSDT",
+        trailing_levels = [
+            (3, 2), 
+            (5, 3),
+            (7, 5),
+            (9, 7),
+            (11, 9),
+            (15, 12),
+            (20, 18),
+            (25, 20),
+            (30, 25),
+            (40, 35),
+            (50, 45),
+            (60, 55),
+            (70, 65),
+            (80, 75),
+            (90, 85),
+        ]
+    )
+    check_weight_usage()
+    print("#"*72)
 
 ##############################################################################
