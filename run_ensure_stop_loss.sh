@@ -1,15 +1,15 @@
 #!/bin/bash
 
 # Define the interval (in seconds) between runs
-INTERVAL=5
+INTERVAL=10
 
-echo "Starting iterative execution of run_profit_trailing.py every $INTERVAL seconds. Press Ctrl+C to stop."
+echo "Starting iterative execution of run_ensure_stop_loss.py every $INTERVAL seconds. Press Ctrl+C to stop."
 echo "---"
 
 while true
 do
     # Use python3 to ensure you're using the correct interpreter
-    python3 run_profit_trailing.py
+    python3 run_ensure_stop_loss.py
 
     # Check if the last command (python3) succeeded
     if [ $? -ne 0 ]; then
@@ -18,8 +18,6 @@ do
     fi
 
     # Wait for the specified interval before the next run
-    echo "Sleeping for $INTERVAL seconds before next run."
-
     sleep $INTERVAL
 
     echo "---"
