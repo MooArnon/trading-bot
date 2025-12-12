@@ -5,6 +5,8 @@
 from abc import abstractmethod
 import datetime
 
+import pandas as pd
+
 ###########
 # Classes #
 ##############################################################################
@@ -16,6 +18,15 @@ class BaseBot:
     ):
         self.set_present_balace = initial_balance
 
+    ##########################################################################
+    
+    def get_signal_mapper(self) -> dict:
+        return {
+            -1: "SHORT",
+            0: "HOLD",
+            1: "LONG",
+        }
+    
     ##########################################################################
     
     def present_balace(self) -> float:
@@ -66,6 +77,12 @@ class BaseBot:
     @abstractmethod
     def get_data(self, *args, **kawrgs) -> None:
         raise NotImplementedError("Child class must implement get_data method")
+    
+    ##########################################################################
+    
+    @abstractmethod
+    def trasform(self, *args, **kawrgs) -> pd.Series:
+        raise NotImplementedError("Child class must implement trasform method")
     
     ##########################################################################
     

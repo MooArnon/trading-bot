@@ -2,16 +2,18 @@
 # Import #
 ##############################################################################
 
-import logging
+from argparse import ArgumentParser
 import time
-import requests
 import schedule
+import os
 
 from config.config import config
-from trading_bot.util.binance import check_weight_usage
-from trading_bot.market.binance import BinanceMarket
-from flow.live import profit_trailing
+from flow.simulation import running_simulation
+from flow.live import running_live
+from trading_bot.bot.indicator_bot import IndicatorBot
 from trading_bot.util.logger import get_utc_logger
+from trading_bot.market.binance import BinanceMarket
+import logging 
 
 ##########
 # Static #
@@ -35,24 +37,28 @@ binance = BinanceMarket(
 ##############################################################################
 
 def main():
-    profit_trailing(
+    bot = IndicatorBot(
         symbol="ADAUSDT",
         logger=logger,
-        leverage=leverage
     )
-    check_weight_usage(logger)
-    logger.info("###################### END ONE LOOP ######################")
+    running_live(
+        bot=bot,
+        market=binance,
+        logger=logger,
+    )
+    print("#"*79)
 
-##########
-# Flows #
+#######
+# Run #
 ##############################################################################
 
-schedule.every(3).seconds.do(main)
+schedule.every(15).seconds.do(main)
 
 if __name__ == "__main__":
-    logger.info("Running profit trailing...")
+
+    logger.info("Bot started. Waiting for schedule...")
     while True:
         schedule.run_pending()
         time.sleep(1)
-
+    
 ##############################################################################
