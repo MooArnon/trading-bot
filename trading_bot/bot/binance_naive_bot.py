@@ -154,13 +154,13 @@ class BinanceNaiveBot(BinanceBot):
 
                 # --- Flowchart Step 5: Decision 1: (s) = HOLD? ---
                 if signal == "HOLD":
-                    self.logger.info("--> Decision: Signal is HOLD. Returning to wait step.")
+                    self.logger.info("Decision: Signal is HOLD. Returning to wait step.")
                     # 'continue' skips the rest of the loop and restarts the while True
                     continue
 
                 # --- Flowchart Step 6: Decision 2: Is having open contract? ---
                 if self.has_open_contract is True:
-                    self.logger.info("--> Decision: Open contract EXISTS. Cannot open new position. Returning to wait step.")
+                    self.logger.info("Decision: Open contract EXISTS. Cannot open new position. Returning to wait step.")
                     # 'continue' skips the rest of the loop and restarts the while True
                     continue
 
@@ -1054,6 +1054,11 @@ class BinanceNaiveBot(BinanceBot):
 
         # Use f-string formatting to ensure the final result is correctly precise
         return float(f"{rounded_price:.{precision}f}")
+    
+    ##########################################################################
+
+    def transform(self, *args, **kawrgs) -> None:
+        pass
     
     ##########################################################################
 

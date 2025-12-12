@@ -9,7 +9,7 @@ from abc import abstractmethod
 ##############################################################################
 
 class BaseMarket:
-    def __init__(self):
+    def __init__(self, logger, symbol):
         pass
 
     ##########################################################################

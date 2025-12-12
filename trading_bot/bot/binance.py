@@ -79,8 +79,8 @@ class BinanceBot(BaseBot):
             self, 
             symbol: str, 
             target_date: str, 
-            limit: int = 10,
-            interval: str = Client.KLINE_INTERVAL_15MINUTE,
+            limit: int = 30,
+            interval: str = Client.KLINE_INTERVAL_1MINUTE,
     ) -> None:
         params = {
             "symbol": symbol.upper(),
@@ -88,7 +88,7 @@ class BinanceBot(BaseBot):
             "limit": limit
         }
         
-        minutes_to_subtract = 15 * limit
+        minutes_to_subtract = 1 * limit
         duration = datetime.timedelta(minutes=minutes_to_subtract)
         params["endTime"] = int(target_date.timestamp() * 1000)
         params["startTime"] = int(
@@ -97,10 +97,6 @@ class BinanceBot(BaseBot):
         response = requests.get(self.base_url_usdm_market, params=params)
         self.logger.debug(f"{params}")
         return  pd.DataFrame(response.json(), columns=self.kline_columns)
-    
-    ##########################################################################
-    
-    
     
     ##########################################################################
     
