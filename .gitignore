@@ -210,3 +210,5 @@ set_env.sh
 .env
 
 .vscode/
+
+local/
