@@ -53,7 +53,7 @@ def running_simulation(start_time: str, bot: BaseBot) -> None:
                 target_date=timestamp_truncated, 
             )
             
-            feature = bot.trasform(
+            feature = bot.transform(
                 data=data
             )
             

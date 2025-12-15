@@ -56,7 +56,7 @@ def running_live(bot: BaseBot, market: BaseMarket, logger, grain: str = '1m') ->
             target_date=timestamp_truncated, 
         )
         
-        feature = bot.trasform(
+        feature = bot.transform(
             data=data
         )
         

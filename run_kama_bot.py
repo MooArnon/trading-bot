@@ -40,6 +40,8 @@ def main():
     bot = IndicatorBot(
         symbol="ADAUSDT",
         logger=logger,
+        check_volatility = True,
+        bandwidth_threshold = 0.020,
     )
     running_live(
         bot=bot,
