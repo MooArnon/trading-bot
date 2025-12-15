@@ -89,39 +89,43 @@ def profit_trailing(
 ) -> None:
     """
     Dynamically adjust stop-loss based on ROI thresholds.
+    Includes 'Ratchet' logic to prevent SL from moving backwards.
     """
+    # Note: Ensure these imports are available in your main file
+    # from binance.helpers import round_step_size
+    # from binance.error import BinanceAPIException
+    
     client = Client(os.environ["BINANCE_API_KEY"], os.environ["BINANCE_SECRET_KEY"])
 
     try:
+        # ---------------------------------------------------------
         # 1. Get position info
-        # Note: We use client here, not a new Client() instance
+        # ---------------------------------------------------------
         position_info = client.futures_position_information(symbol=symbol)
         
-        # Safe check for empty position data
         if not position_info or float(position_info[0]['positionAmt']) == 0:
             logger.info(f"No position information for {symbol}. Exiting.")
             return
 
-        # Extract data
         position_data = position_info[0]
         position_amt = float(position_data['positionAmt'])
         entry_price = float(position_data['entryPrice'])
         unrealized_profit = float(position_data['unRealizedProfit'])
         
-        # Calculate ROI % manually to be safe (unRealizedProfit / Initial Margin)
-        # Initial Margin = (Entry Price * Quantity) / Leverage
         initial_margin = (entry_price * abs(position_amt)) / leverage
         if initial_margin == 0: 
-            return # Avoid division by zero
+            return 
         
-        # ROI as a percentage (e.g., 5.0 for 5%)
         roi = (unrealized_profit / initial_margin) * 100 
 
+        # ---------------------------------------------------------
         # 2. Determine side
+        # ---------------------------------------------------------
         side = "LONG" if position_amt > 0 else "SHORT"
 
-        # 3. Get Precision Info (CRITICAL FIX)
-        # We need to know the allowed tick size and step size for this symbol
+        # ---------------------------------------------------------
+        # 3. Get Precision Info
+        # ---------------------------------------------------------
         exchange_info = client.futures_exchange_info()
         symbol_info = next((item for item in exchange_info['symbols'] if item['symbol'] == symbol), None)
         
@@ -129,8 +133,8 @@ def profit_trailing(
             logger.error(f"Could not find symbol info for {symbol}")
             return
             
-        tick_size = float(symbol_info['filters'][0]['tickSize']) # Price precision
-        step_size = float(symbol_info['filters'][1]['stepSize']) # Quantity precision
+        tick_size = float(symbol_info['filters'][0]['tickSize']) 
+        step_size = float(symbol_info['filters'][1]['stepSize']) 
 
         logger.info(
             f"Side: {side} | Entry: {entry_price} | ROI: {roi:.2f}% | "
@@ -140,15 +144,22 @@ def profit_trailing(
         if roi <= 0:
             return
 
-        # 4. Check existing SL orders
+        # ---------------------------------------------------------
+        # 4. Check existing SL orders (FIXED)
+        # ---------------------------------------------------------
         open_orders = client.futures_get_open_orders(symbol=symbol)
         current_sl_order = None
+        
         for order in open_orders:
-            if order.get('type') in ['STOP_MARKET', 'STOP'] and order.get('reduceOnly') is True:
+            # FIXED: Relaxed check. Simply finding the STOP_MARKET order is sufficient.
+            # The previous 'reduceOnly is True' check often fails due to API formatting.
+            if order.get('type') == 'STOP_MARKET':
                 current_sl_order = order
                 break
 
+        # ---------------------------------------------------------
         # 5. Determine trigger level
+        # ---------------------------------------------------------
         trailing_levels_sorted = sorted(trailing_levels, key=lambda x: x[0])
         triggered_level = None
         
@@ -161,7 +172,9 @@ def profit_trailing(
         if not triggered_level:
             return
 
+        # ---------------------------------------------------------
         # 6. Compute New Stop Loss Price
+        # ---------------------------------------------------------
         stop_loss_target_roi = triggered_level[1]
         price_movement_pct = stop_loss_target_roi / leverage
 
@@ -170,53 +183,61 @@ def profit_trailing(
         else:
             raw_sl_price = entry_price * (1 - (price_movement_pct / 100))
 
-        # 7. Round Price using Binance helper (CRITICAL FIX)
+        # 7. Round Price
         new_sl_price = round_step_size(raw_sl_price, tick_size)
 
-        # 8. Check against existing SL (Don't move backwards)
+        # ---------------------------------------------------------
+        # 8. Check against existing SL (FIXED RATCHET LOGIC)
+        # ---------------------------------------------------------
         if current_sl_order:
             current_sl_price = float(current_sl_order.get('stopPrice', 0))
             
-            # Allow a tiny tolerance for floating point comparison
+            # Same price? Ignore.
             if abs(new_sl_price - current_sl_price) < tick_size:
-                return # Same price, ignore
+                return 
 
+            # CRITICAL FIX: Explicitly forbid moving backwards
             if side == "LONG" and new_sl_price < current_sl_price:
-                logger.info(f"New SL {new_sl_price} < Current {current_sl_price}. Ignoring to protect profit.")
+                logger.info(f"SKIP: New SL {new_sl_price} < Current {current_sl_price}. Keeping tighter SL.")
                 return
             elif side == "SHORT" and new_sl_price > current_sl_price:
-                logger.info(f"New SL {new_sl_price} > Current {current_sl_price}. Ignoring to protect profit.")
+                logger.info(f"SKIP: New SL {new_sl_price} > Current {current_sl_price}. Keeping tighter SL.")
                 return
 
         logger.info(f"Updating SL to lock {stop_loss_target_roi}% ROI. Price: {new_sl_price}")
 
-        # 9. Cancel Existing SL
+        # ---------------------------------------------------------
+        # 9. Cancel & Replace (Optimized)
+        # ---------------------------------------------------------
+        
+        # We use a specific function or logic to cancel the OLD order first
+        # This prevents "Too many orders" errors
         if current_sl_order:
             try:
+                # If you have a helper function 'cancel_algo_order', you can use it here
+                # Otherwise, cancelling by ID is precise
                 client.futures_cancel_order(symbol=symbol, orderId=current_sl_order['orderId'])
+                logger.info(f" -> Cancelled old SL: {current_sl_order['orderId']}")
             except Exception as e:
                 logger.warning(f"Failed to cancel old SL: {e}")
 
         # 10. Place New SL Order
-        # Round the quantity to the valid step size
         qty_to_close = round_step_size(abs(position_amt), step_size)
-        
         sl_side = Client.SIDE_SELL if side == "LONG" else Client.SIDE_BUY
 
         try:
-            cancel_algo_order(client, symbol, 'STOP_MARKET', logger)
-            order_info = client.futures_create_order(
+            # Note: We rely on the generic client here rather than creating a new order_info object blindly
+            client.futures_create_order(
                 symbol=symbol,
                 side=sl_side,
                 type='STOP_MARKET',
-                stopPrice=new_sl_price,     # Standard endpoint uses stopPrice
-                closePosition=False,        # We use reduceOnly instead
-                quantity=qty_to_close,      # Explicit rounded quantity
+                stopPrice=new_sl_price,     
+                closePosition=False,        
+                quantity=qty_to_close,      
                 reduceOnly=True,
                 timeInForce='GTC'
             )
             logger.info(f"SUCCESS: Trailing SL updated to {new_sl_price}")
-            
             
         except BinanceAPIException as e:
             if "Order would immediately trigger" in str(e):
@@ -226,7 +247,7 @@ def profit_trailing(
                 
     except Exception as e:
         logger.error(f"Critical error in profit_trailing: {e}", exc_info=True)
-        
+
 ##########################################################################
 
 def ensure_stop_loss(
