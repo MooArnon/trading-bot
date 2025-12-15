@@ -81,8 +81,8 @@ class BaseBot:
     ##########################################################################
     
     @abstractmethod
-    def trasform(self, *args, **kawrgs) -> pd.Series:
-        raise NotImplementedError("Child class must implement trasform method")
+    def transform(self, *args, **kawrgs) -> pd.Series:
+        raise NotImplementedError("Child class must implement transform method")
     
     ##########################################################################
     

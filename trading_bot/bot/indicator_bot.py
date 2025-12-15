@@ -31,6 +31,8 @@ class IndicatorBot(BinanceBot):
             secret_key: str = os.environ["BINANCE_SECRET_KEY"],
             logger: Logger=None,
             signal_type: str = 'KAMA',
+            check_volatility: bool = True,
+            bandwidth_threshold: float = 0.020,
     ):
         if logger is None:
             logger = get_utc_logger(
@@ -41,6 +43,8 @@ class IndicatorBot(BinanceBot):
         self.symbol = symbol
         self.logger = logger
         self.signal_type = signal_type
+        self.check_volatility = check_volatility
+        self.bandwidth_threshold = bandwidth_threshold
         
         self.client = Client(api_key, secret_key)
         
@@ -73,7 +77,7 @@ class IndicatorBot(BinanceBot):
 
     ##########################################################################
     
-    def trasform(
+    def transform(
             self, 
             data: pd.DataFrame,
             target_column: str = 'Close',
@@ -139,27 +143,45 @@ class IndicatorBot(BinanceBot):
         Generates Buy (1) and Sell (-1) signals based on KAMA crossover.
         """
         df = df.copy()
-        # 1. Create a 'Signal' column initialized to 0
-        df['signal'] = 0
         
+        # Ensure correct types
         df['KAMA'] = df['KAMA'].astype(float)
         df[target_column] = df[target_column].astype(float)
+        
+        # 1. Determine Volatility Safety
+        # Default to True (Safe) so if check_volatility is False, we trade everything.
+        is_safe_volatility = True 
 
-        # 2. Define the Buy Condition (Crossover Up)
-        # current Close > current KAMA  AND  previous Close < previous KAMA
-        buy_condition = (
-            df[target_column] > df['KAMA']) & (df[target_column].shift(1) < df['KAMA'].shift(1)
-        )
+        if self.check_volatility is True:
+            # Calculate Bollinger Bandwidth (Pure Pandas)
+            # Standard settings: Length=20, Std=2
+            sma20 = df[target_column].rolling(window=20).mean()
+            std20 = df[target_column].rolling(window=20).std()
+            
+            upper_band = sma20 + (2 * std20)
+            lower_band = sma20 - (2 * std20)
+            
+            # Bandwidth = (Upper - Lower) / Middle
+            # Fill NaNs with 0 to avoid errors on initial rows
+            df['bandwidth'] = ((upper_band - lower_band) / sma20).fillna(0)
+            
+            # The Filter: True if bandwidth is wide enough, False if squeeze
+            is_safe_volatility = df['bandwidth'] > self.bandwidth_threshold
+
+        # 2. Define KAMA Crossover Signals
+        # Initialize signal column
+        df['signal'] = 0
+
+        # Crossover Up (Buy)
+        crossover_up = (df[target_column] > df['KAMA']) & (df[target_column].shift(1) < df['KAMA'].shift(1))
         
-        # 3. Define the Sell Condition (Crossover Down)
-        # current Close < current KAMA  AND  previous Close > previous KAMA
-        sell_condition = (
-            df[target_column] < df['KAMA']) & (df[target_column].shift(1) > df['KAMA'].shift(1)
-        )
+        # Crossover Down (Sell)
+        crossover_down = (df[target_column] < df['KAMA']) & (df[target_column].shift(1) > df['KAMA'].shift(1))
         
-        # 4. Apply Signals
-        df.loc[buy_condition, 'signal'] = 1   # BUY
-        df.loc[sell_condition, 'signal'] = -1 # SELL
+        # 3. Apply Combined Logic
+        # If check_volatility is False, 'is_safe_volatility' is implicitly True for all rows.
+        df.loc[crossover_up & is_safe_volatility, 'signal'] = 1
+        df.loc[crossover_down & is_safe_volatility, 'signal'] = -1
 
         return df
     
