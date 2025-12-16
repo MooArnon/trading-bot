@@ -26,11 +26,6 @@ logger = get_utc_logger(
     level=logging.DEBUG,
 )
 
-binance = BinanceMarket(
-    logger=logger,
-    symbol="ADAUSDT",
-    leverage = leverage,
-)
 
 client = Client(os.environ["BINANCE_API_KEY"], os.environ["BINANCE_SECRET_KEY"])
 

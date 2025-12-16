@@ -18,8 +18,6 @@ import logging
 
 symbol_to_check = [
     "ADAUSDT",
-    "ETHUSDT",
-    "DOGEUSDT",
 ]
 
 leverage = config['LEVERAGE']
@@ -44,7 +42,7 @@ def main():
             symbol=sym,
             logger=logger,
             check_volatility = True,
-            bandwidth_threshold = 0.020,
+            bandwidth_threshold = config['BANDWIDTH_THRESHOLD'],
         )
         try:
             running_live(
