@@ -5,6 +5,7 @@
 import datetime
 import random
 
+import requests
 import pandas as pd
 from binance.helpers import round_step_size
 from binance.client import Client
@@ -77,7 +78,6 @@ def running_live(bot: BaseBot, market: BaseMarket, logger, grain: str = '1m') ->
 
 def profit_trailing(
     client,
-    symbol: str,
     logger,
     leverage: int,
     trailing_levels: list = [
@@ -90,7 +90,14 @@ def profit_trailing(
     Dynamically adjust stop-loss based on ROI.
     Prevents order stacking by clearing ALL old stops before placing a new one.
     """
+    open_order = client.futures_position_information()
+    if open_order == []:
+        logger.info("No open position found. Exiting profit_trailing.")
+        return
+    else:
+        symbol = open_order[0]['symbol']
 
+    logger.info(f"--- Starting profit_trailing for {symbol} ---")
     try:
         # 1. Get position info
         position_info = client.futures_position_information(symbol=symbol)
@@ -236,7 +243,6 @@ def profit_trailing(
 ##########################################################################
 
 def ensure_stop_loss(
-        symbol: str,
         client,
         leverage,
         logger,
@@ -258,7 +264,15 @@ def ensure_stop_loss(
         leverage: int 
             default is 20
         """
-
+        open_order = client.futures_position_information()
+        if open_order == []:
+            logger.info("No open position found. Exiting profit_trailing.")
+            return
+        else:
+            symbol = open_order[0]['symbol']
+        
+        logger.info(f"--- Starting ensure_stop_loss for {symbol} ---")
+        
         # Get the current position for the symbol
         positions_info = client.futures_position_information(symbol=symbol)
         
@@ -464,7 +478,7 @@ def cancel_algo_take_profits(client, symbol):
 ##############################################################################
 
 def cancel_algo_order(client, symbol, type_to_cancel, logger):
-    logger.info(f"--- Searching for ALGO Take {type_to_cancel} on {symbol} ---")
+    logger.info(f"Searching for ALGO Take {type_to_cancel} on {symbol}")
     # 1. Fetch all open Algo orders
     try:
         response = client.futures_get_open_algo_orders(symbol=symbol)
@@ -525,4 +539,17 @@ def check_open_algo_order(client, symbol, type_to_cancel, logger, return_price=F
     else:
         return False, 0.0
             
+##############################################################################
+
+def get_my_open_positions(client):
+    # Fetch position information (this returns ALL symbols, usually 200+)
+    positions = client.futures_position_information()
+    if len(positions) == 0:
+        return []
+    elif len(positions) == 1:
+        return positions[0]
+    else:
+        raise Exception("Multiple open positions found, expected only one.")
+    
+    
 ##############################################################################

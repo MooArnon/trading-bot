@@ -35,7 +35,6 @@ client = Client(os.environ["BINANCE_API_KEY"], os.environ["BINANCE_SECRET_KEY"])
 def main():
     logger.info("Run ensure stop loss...")
     ensure_stop_loss(
-        "ADAUSDT",
         client=client,
         logger=logger,
         stop_loss_percent=3.0,
