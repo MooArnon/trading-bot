@@ -4,8 +4,6 @@
 
 import datetime
 import random
-import os
-import time
 
 import pandas as pd
 from binance.helpers import round_step_size
@@ -78,6 +76,7 @@ def running_live(bot: BaseBot, market: BaseMarket, logger, grain: str = '1m') ->
 ##############################################################################
 
 def profit_trailing(
+    client,
     symbol: str,
     logger,
     leverage: int,
@@ -88,81 +87,63 @@ def profit_trailing(
     ]
 ) -> None:
     """
-    Dynamically adjust stop-loss based on ROI thresholds.
-    Includes 'Ratchet' logic to prevent SL from moving backwards.
+    Dynamically adjust stop-loss based on ROI.
+    Prevents order stacking by clearing ALL old stops before placing a new one.
     """
-    # Note: Ensure these imports are available in your main file
-    # from binance.helpers import round_step_size
-    # from binance.error import BinanceAPIException
-    
-    client = Client(os.environ["BINANCE_API_KEY"], os.environ["BINANCE_SECRET_KEY"])
 
     try:
-        # ---------------------------------------------------------
         # 1. Get position info
-        # ---------------------------------------------------------
         position_info = client.futures_position_information(symbol=symbol)
-        
         if not position_info or float(position_info[0]['positionAmt']) == 0:
-            logger.info(f"No position information for {symbol}. Exiting.")
-            return
+            logger.info(f"No open position for {symbol}. Exiting profit_trailing.")
+            return 
 
         position_data = position_info[0]
         position_amt = float(position_data['positionAmt'])
         entry_price = float(position_data['entryPrice'])
         unrealized_profit = float(position_data['unRealizedProfit'])
         
+        # Calculate ROI
         initial_margin = (entry_price * abs(position_amt)) / leverage
         if initial_margin == 0: 
-            return 
-        
+            logger.info("Initial margin is 0. Cannot calculate ROI. Exiting.")
+            return
         roi = (unrealized_profit / initial_margin) * 100 
 
-        # ---------------------------------------------------------
         # 2. Determine side
-        # ---------------------------------------------------------
         side = "LONG" if position_amt > 0 else "SHORT"
 
-        # ---------------------------------------------------------
-        # 3. Get Precision Info
-        # ---------------------------------------------------------
+        # 3. Precision Info
         exchange_info = client.futures_exchange_info()
         symbol_info = next((item for item in exchange_info['symbols'] if item['symbol'] == symbol), None)
-        
-        if not symbol_info:
-            logger.error(f"Could not find symbol info for {symbol}")
+        if not symbol_info: 
+            logger.error(f"Symbol info for {symbol} not found. Exiting.")
             return
-            
         tick_size = float(symbol_info['filters'][0]['tickSize']) 
         step_size = float(symbol_info['filters'][1]['stepSize']) 
 
-        logger.info(
-            f"Side: {side} | Entry: {entry_price} | ROI: {roi:.2f}% | "
-            f"Precision - Price: {tick_size}, Qty: {step_size}"
-        )
-
-        if roi <= 0:
+        if roi <= 0: 
+            logger.info(f"ROI {round(roi, 3)}% <= 0%. No trailing adjustment needed.")
             return
 
-        # ---------------------------------------------------------
-        # 4. Check existing SL orders (FIXED)
-        # ---------------------------------------------------------
-        open_orders = client.futures_get_open_orders(symbol=symbol)
-        current_sl_order = None
+        logger.info(f"Current ROI: {round(roi, 3)}% | Position: {side} {abs(position_amt)} @ {entry_price}")
         
-        for order in open_orders:
-            # FIXED: Relaxed check. Simply finding the STOP_MARKET order is sufficient.
-            # The previous 'reduceOnly is True' check often fails due to API formatting.
-            if order.get('type') == 'STOP_MARKET':
-                current_sl_order = order
-                break
-
         # ---------------------------------------------------------
-        # 5. Determine trigger level
+        # 4. FIND ALL EXISTING STOP ORDERS (CRITICAL FIX)
+        # ---------------------------------------------------------
+        open_orders, current_best_sl = check_open_algo_order(
+            client, 
+            symbol, 
+            'STOP_MARKET', 
+            logger,
+            True,
+        )
+        
+        # ---------------------------------------------------------
+        # 5. Determine Target Trigger
         # ---------------------------------------------------------
         trailing_levels_sorted = sorted(trailing_levels, key=lambda x: x[0])
         triggered_level = None
-        
         for (profit_trigger, stop_loss_level) in trailing_levels_sorted:
             if roi >= profit_trigger:
                 triggered_level = (profit_trigger, stop_loss_level)
@@ -170,11 +151,12 @@ def profit_trailing(
                 break
 
         if not triggered_level:
+            logger.info(
+                f"No trailing level triggered for ROI {round(roi, 3)}%. Next level is {trailing_levels_sorted[0][0]}%. Exiting."
+            )
             return
 
-        # ---------------------------------------------------------
-        # 6. Compute New Stop Loss Price
-        # ---------------------------------------------------------
+        # 6. Calculate New Price
         stop_loss_target_roi = triggered_level[1]
         price_movement_pct = stop_loss_target_roi / leverage
 
@@ -183,57 +165,60 @@ def profit_trailing(
         else:
             raw_sl_price = entry_price * (1 - (price_movement_pct / 100))
 
-        # 7. Round Price
         new_sl_price = round_step_size(raw_sl_price, tick_size)
 
         # ---------------------------------------------------------
-        # 8. Check against existing SL (FIXED RATCHET LOGIC)
+        # 7. LOGIC CHECK: Do we need to update?
         # ---------------------------------------------------------
-        if current_sl_order:
-            current_sl_price = float(current_sl_order.get('stopPrice', 0))
+        # Find the "Best" existing SL to compare against
+        logger.info(f"Current Best SL: {current_best_sl} | New SL: {new_sl_price}")
+
+        # Ratchet (Don't move backwards)
+        # Only run this if we aren't in "Cleanup Mode" (cleaning up duplicates)
+        # When LONG, only move SL UP wich mean new SL must be HIGHER than current SL
+        # When SHORT, only move SL DOWN which mean new SL must be LOWER than current SL
+        # This logic will end the flow if the current SL is already better than the new SL.
+        # The below will be ends up like this:
+        # LONG:  -1 ---|----------|----------|------ 1
+        #            new_sl   current_sl   price
+        #
+        # SHORT: -1 ---|----------|----------|------ 1
+        #            price   current_sl     new_sl
+        #
+        if new_sl_price == current_best_sl:
+                logger.info(f"New SL {new_sl_price} is the same as current best SL {current_best_sl}. No update needed.")
+                return # No change
+        if open_orders and abs(new_sl_price - current_best_sl) >= tick_size:
+            if side == "LONG" and new_sl_price < current_best_sl:
+                logger.info(f"New SL {new_sl_price} is lower than current best SL {current_best_sl}. Ignoring to ratchet up only.")
+                return # New SL is lower than current. Ignore.
+            if side == "SHORT" and new_sl_price > current_best_sl:
+                logger.info(f"New SL {new_sl_price} is higher than current best SL {current_best_sl}. Ignoring to ratchet down only.")
+                return # New SL is higher than current. Ignore.
             
-            # Same price? Ignore.
-            if abs(new_sl_price - current_sl_price) < tick_size:
-                return 
-
-            # CRITICAL FIX: Explicitly forbid moving backwards
-            if side == "LONG" and new_sl_price < current_sl_price:
-                logger.info(f"SKIP: New SL {new_sl_price} < Current {current_sl_price}. Keeping tighter SL.")
-                return
-            elif side == "SHORT" and new_sl_price > current_sl_price:
-                logger.info(f"SKIP: New SL {new_sl_price} > Current {current_sl_price}. Keeping tighter SL.")
-                return
-
+        # ---------------------------------------------------------
+        # 8. EXECUTION: Cancel ALL & Place ONE
+        # ---------------------------------------------------------
         logger.info(f"Updating SL to lock {stop_loss_target_roi}% ROI. Price: {new_sl_price}")
-
-        # ---------------------------------------------------------
-        # 9. Cancel & Replace (Optimized)
-        # ---------------------------------------------------------
+        cancel_algo_order(
+            client=client, 
+            symbol=symbol,
+            type_to_cancel='STOP_MARKET',
+            logger=logger,
+        )
         
-        # We use a specific function or logic to cancel the OLD order first
-        # This prevents "Too many orders" errors
-        if current_sl_order:
-            try:
-                # If you have a helper function 'cancel_algo_order', you can use it here
-                # Otherwise, cancelling by ID is precise
-                client.futures_cancel_order(symbol=symbol, orderId=current_sl_order['orderId'])
-                logger.info(f" -> Cancelled old SL: {current_sl_order['orderId']}")
-            except Exception as e:
-                logger.warning(f"Failed to cancel old SL: {e}")
-
-        # 10. Place New SL Order
+        # Place the single new order
         qty_to_close = round_step_size(abs(position_amt), step_size)
         sl_side = Client.SIDE_SELL if side == "LONG" else Client.SIDE_BUY
 
         try:
-            # Note: We rely on the generic client here rather than creating a new order_info object blindly
             client.futures_create_order(
                 symbol=symbol,
                 side=sl_side,
                 type='STOP_MARKET',
-                stopPrice=new_sl_price,     
-                closePosition=False,        
-                quantity=qty_to_close,      
+                stopPrice=new_sl_price,
+                closePosition=False,
+                quantity=qty_to_close,
                 reduceOnly=True,
                 timeInForce='GTC'
             )
@@ -241,10 +226,10 @@ def profit_trailing(
             
         except BinanceAPIException as e:
             if "Order would immediately trigger" in str(e):
-                logger.warning(f"SL Price {new_sl_price} is too close to current price. Skipping.")
+                logger.warning(f"SL Price {new_sl_price} is too close. Skipping.")
             else:
                 logger.error(f"Error placing SL: {e}")
-                
+
     except Exception as e:
         logger.error(f"Critical error in profit_trailing: {e}", exc_info=True)
 
@@ -444,7 +429,7 @@ def get_roi(symbol: str, all_positions_data: list) -> float:
 ##############################################################################
 
 def cancel_algo_take_profits(client, symbol):
-    print(f"--- Searching for ALGO Take Profits on {symbol} ---")
+    print(f"--- Canceling ALGO Take Profits on {symbol} ---")
     # 1. Fetch all open Algo orders
     try:
         response = client.futures_get_open_algo_orders(symbol=symbol)
@@ -513,7 +498,7 @@ def cancel_algo_order(client, symbol, type_to_cancel, logger):
 
 ##############################################################################
 
-def check_open_algo_order(client, symbol, type_to_cancel, logger):
+def check_open_algo_order(client, symbol, type_to_cancel, logger, return_price=False):
     logger.info(f"--- Searching for ALGO {type_to_cancel} on {symbol} ---")
     # 1. Fetch all open Algo orders
     try:
@@ -523,7 +508,6 @@ def check_open_algo_order(client, symbol, type_to_cancel, logger):
     except Exception as e:
         logger.info(f"Error fetching orders: {e}")
         return
-
     # 2. Iterate and check
     for order in algo_orders:
 
@@ -531,8 +515,14 @@ def check_open_algo_order(client, symbol, type_to_cancel, logger):
             algo_id = order['algoId']
             logger.info(f"Found {type_to_cancel} Algo Order: {algo_id}.")
             
-            return True
+            if return_price is False:
+                return True
+            else:
+                return True, float(order['triggerPrice'])
         
-    return False
+    if return_price is False:
+        return False
+    else:
+        return False, 0.0
             
 ##############################################################################
