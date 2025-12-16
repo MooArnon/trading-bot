@@ -2,13 +2,10 @@
 # Import #
 ##############################################################################
 
-from argparse import ArgumentParser
 import time
 import schedule
-import os
 
 from config.config import config
-from flow.simulation import running_simulation
 from flow.live import running_live
 from trading_bot.bot.indicator_bot import IndicatorBot
 from trading_bot.util.logger import get_utc_logger
@@ -19,6 +16,12 @@ import logging
 # Static #
 ##############################################################################
 
+symbol_to_check = [
+    "ADAUSDT",
+    "ETHUSDT",
+    "DOGEUSDT",
+]
+
 leverage = config['LEVERAGE']
 
 logger = get_utc_logger(
@@ -26,35 +29,40 @@ logger = get_utc_logger(
     level=logging.DEBUG,
 )
 
-binance = BinanceMarket(
-    logger=logger,
-    symbol="ADAUSDT",
-    leverage = leverage,
-)
-
 #############
 # Functions #
 ##############################################################################
 
 def main():
-    bot = IndicatorBot(
-        symbol="ADAUSDT",
-        logger=logger,
-        check_volatility = True,
-        bandwidth_threshold = 0.020,
-    )
-    running_live(
-        bot=bot,
-        market=binance,
-        logger=logger,
-    )
+    for sym in symbol_to_check:
+        binance = BinanceMarket(
+            logger=logger,
+            symbol=sym,
+            leverage = leverage,
+        )
+        bot = IndicatorBot(
+            symbol=sym,
+            logger=logger,
+            check_volatility = True,
+            bandwidth_threshold = 0.020,
+        )
+        try:
+            running_live(
+                bot=bot,
+                market=binance,
+                logger=logger,
+            )
+        except Exception as e:
+            logger.error(f"Error running live for {sym}: {e}")
+        time.sleep(30)
+        print("-"*79)
     print("#"*79)
 
 #######
 # Run #
 ##############################################################################
 
-schedule.every(15).seconds.do(main)
+schedule.every(60).seconds.do(main)
 
 if __name__ == "__main__":
 
