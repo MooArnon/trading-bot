@@ -42,8 +42,7 @@ def main():
             logger=logger,
             stop_loss_percent=3.0,
             leverage=leverage
-        )   
-        raise BufferError("Test error for discord alert")
+        )
     except Exception as e:
         logger.error(f"Error in ensure_stop_loss: {e}", exc_info=True)
         discord_alert.sent_message(
