@@ -122,9 +122,6 @@ class BinanceMarket(BaseMarket):
     def open_order_flow(self, signal: str) -> None:
         """
         """
-        #! DELETE THIS LINE AFTER TESTING
-        signal="LONG"
-        
         self.logger.info("Open order flow initialized")
         if signal == "HOLD":
             self.logger.info("Decision: Signal is HOLD. Returning to wait step.")
