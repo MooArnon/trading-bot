@@ -33,6 +33,7 @@ class IndicatorBot(BinanceBot):
             signal_type: str = 'KAMA',
             check_volatility: bool = True,
             bandwidth_threshold: float = 0.020,
+            notify_object: object = None,
     ):
         if logger is None:
             logger = get_utc_logger(
@@ -45,6 +46,7 @@ class IndicatorBot(BinanceBot):
         self.signal_type = signal_type
         self.check_volatility = check_volatility
         self.bandwidth_threshold = bandwidth_threshold
+        self.notify_object = notify_object
         
         self.client = Client(api_key, secret_key)
         

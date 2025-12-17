@@ -2,6 +2,7 @@
 # Import #
 ##############################################################################
 
+import os
 import time
 import schedule
 
@@ -11,10 +12,15 @@ from trading_bot.bot.indicator_bot import IndicatorBot
 from trading_bot.util.logger import get_utc_logger
 from trading_bot.market.binance import BinanceMarket
 import logging 
+from util.discord import DiscordNotify
+
 
 ##########
 # Static #
 ##############################################################################
+
+discord_alert = DiscordNotify(webhook_url=os.environ["DISCORD_ALERT_WEBHOOK_URL"])
+discord_notify = DiscordNotify(webhook_url=os.environ["DISCORD_NOTIFY_WEBHOOK_URL"])
 
 symbol_to_check = [
     "ADAUSDT",
@@ -37,6 +43,7 @@ def main():
             logger=logger,
             symbol=sym,
             leverage = leverage,
+            notify_object=discord_notify,
         )
         bot = IndicatorBot(
             symbol=sym,
@@ -51,6 +58,10 @@ def main():
                 logger=logger,
             )
         except Exception as e:
+            discord_alert.sent_message(
+                message=f":warning: Error running live for {sym}: {e}",
+                username="live_bot"
+            )
             logger.error(f"Error running live for {sym}: {e}")
         time.sleep(30)
         print("-"*79)
