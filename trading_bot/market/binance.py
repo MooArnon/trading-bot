@@ -32,6 +32,7 @@ class BinanceMarket(BaseMarket):
             sl_percent=2.0,
             api_key: str = os.environ["BINANCE_API_KEY"],
             secret_key: str = os.environ["BINANCE_SECRET_KEY"],
+            notify_object: object = None,
     ) -> None:
         super().__init__(logger=logger, symbol=symbol)
         
@@ -45,6 +46,7 @@ class BinanceMarket(BaseMarket):
         self.sl_percent = sl_percent
         self.leverage = leverage
         self.symbol_filters = {}
+        self.notify_object = notify_object
         
         # Signal definitions
         self.SIGNALS = ["HOLD", "SHORT", "LONG"]
@@ -120,6 +122,9 @@ class BinanceMarket(BaseMarket):
     def open_order_flow(self, signal: str) -> None:
         """
         """
+        #! DELETE THIS LINE AFTER TESTING
+        signal="LONG"
+        
         self.logger.info("Open order flow initialized")
         if signal == "HOLD":
             self.logger.info("Decision: Signal is HOLD. Returning to wait step.")
@@ -324,6 +329,7 @@ class BinanceMarket(BaseMarket):
                     price=price,
                     timeInForce=Client.TIME_IN_FORCE_GTC,
                 )
+                self.notify_object.sent_message("Placed LONG order")
             elif position_type == 'SHORT':
                 market_order = self.client.futures_create_order(
                     symbol=symbol,
@@ -333,6 +339,7 @@ class BinanceMarket(BaseMarket):
                     price=price,
                     timeInForce=Client.TIME_IN_FORCE_GTC,
                 )
+                self.notify_object.sent_message("Placed SHORT order")
             self.logger.info(f"Market order placed: {market_order}")
             
             tp_order = self.client.futures_create_order(
