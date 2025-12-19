@@ -2,78 +2,126 @@ from trading_bot.bot.indicator_bot import IndicatorBot
 import datetime
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
-THRESHOLD = 0.007
-symbol = "ETHUSDT"
 
-bot = IndicatorBot(symbol=symbol, check_volatility=True, bandwidth_threshold=THRESHOLD)
+BANDWIDTH_THRESHOLD = 0.003
+symbol = "ADAUSDT"
+
+bot = IndicatorBot(
+    symbol=symbol, 
+    check_volatility=True, 
+    bandwidth_threshold=BANDWIDTH_THRESHOLD,
+    signal_type = [
+        'KAMA', 
+        # 'RSI',
+    ],
+)
 
 data = bot.get_data(
     symbol=symbol,
     interval="1m",
-    target_date=datetime.datetime.strptime("2025-12-17 17:00:00", "%Y-%m-%d %H:%M:%S"),
+    target_date=datetime.datetime.strptime("2025-12-19 17:00:00", "%Y-%m-%d %H:%M:%S"),
     limit=1000,
 )
 
 signal = bot.transform(data)
 df = bot.generate_signal(signal)
 
-df['close_time'] = pd.to_datetime(df['Close Time'], unit='ms', utc=True)
+df.to_csv("indicator_output.csv", index=False)
 
-# Convert to Bangkok Time (UTC+7)
-df['close_time_local'] = df['close_time'].dt.tz_convert('Asia/Bangkok')
+# 1. Load Data
+file_path = 'indicator_output.csv'
+df = pd.read_csv(file_path)
 
-# Plotting
-# --- Design: Dual Subplots (Price on Top, Volatility on Bottom) ---
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True, 
-                               gridspec_kw={'height_ratios': [3, 1]})
+# 2. Preprocessing
+# Convert timestamp (ms) to datetime
+df['Open Time'] = pd.to_datetime(df['Open Time'], unit='ms')
 
-# === TOP PANEL: Price, KAMA, Signals ===
-ax1.plot(df['close_time_local'], df['Close'], label='Close Price', color='black', alpha=0.6)
-ax1.plot(df['close_time_local'], df['KAMA'], label='KAMA', color='orange', linestyle='--', linewidth=1.5)
+# Calculate bar width for volume chart (80% of the interval)
+if len(df) > 1:
+    time_diff = df['Open Time'].iloc[1] - df['Open Time'].iloc[0]
+    width = time_diff.total_seconds() / (24 * 3600) * 0.8
+else:
+    width = 0.01
 
-# Plot Signals (Green Up / Red Down)
-buys = df[df['signal'] == 1]
-sells = df[df['signal'] == -1]
+# Check for indicators
+has_rsi = 'rsi' in df.columns
+has_bandwidth = 'bandwidth' in df.columns
 
-if not buys.empty:
-    ax1.scatter(buys['close_time_local'], buys['Close'], 
-                color='green', marker='^', s=150, zorder=5, label='Buy Signal')
-if not sells.empty:
-    ax1.scatter(sells['close_time_local'], sells['Close'], 
-                color='red', marker='v', s=150, zorder=5, label='Sell Signal')
+# 3. Setup Plot
+# Define layout dynamically
+plots = ['price']
+if has_rsi: plots.append('rsi')
+if has_bandwidth: plots.append('bandwidth')
+plots.append('volume')
 
-ax1.set_ylabel('Price')
-ax1.set_title('Price Action vs KAMA (with Volatility Context)')
-ax1.legend(loc='upper left')
-ax1.grid(True, linestyle='--', alpha=0.3)
+n_plots = len(plots)
+height_ratios = [3] + [1] * (n_plots - 1)  # Price gets 3x height, others get 1x
 
-# === BOTTOM PANEL: Volatility (Bandwidth) ===
-# Set your filter threshold
+fig = plt.figure(figsize=(14, 3 * n_plots + 2)) 
+gs = fig.add_gridspec(n_plots, 1, height_ratios=height_ratios)
 
-ax2.plot(df['close_time_local'], df['bandwidth'], color='tab:blue', label='Bandwidth')
-ax2.axhline(y=THRESHOLD, color='red', linestyle='--', label=f'Threshold ({THRESHOLD})')
+axes = {}
 
-# Visual Aid: Shade the background of the TOP chart based on BOTTOM chart condition
-# Green Background = Safe Volatility, Red Background = Squeeze
-# (We use fill_between on the top axes using the data from the bottom)
-y_min, y_max = ax1.get_ylim()
-safe_mask = df['bandwidth'] > THRESHOLD
-unsafe_mask = df['bandwidth'] <= THRESHOLD
+# --- Plot Loop ---
+for i, plot_type in enumerate(plots):
+    if i == 0:
+        ax = fig.add_subplot(gs[i])
+        axes['price'] = ax
+    else:
+        # Share x-axis with price plot
+        ax = fig.add_subplot(gs[i], sharex=axes['price'])
+        axes[plot_type] = ax
 
-# Note: This shading method works best with continuous data. 
-# For sparse data, it highlights specific points.
-ax1.fill_between(df['close_time_local'], y_min, y_max, where=safe_mask, 
-                 color='green', alpha=0.05, label='Safe Zone')
-ax1.fill_between(df['close_time_local'], y_min, y_max, where=unsafe_mask, 
-                 color='red', alpha=0.05, label='Squeeze Zone')
+    # Plot Content
+    if plot_type == 'price':
+        ax.plot(df['Open Time'], df['Close'], label='Price', color='gray', linewidth=1, alpha=0.6)
+        if 'KAMA' in df.columns:
+            ax.plot(df['Open Time'], df['KAMA'], label='KAMA', color='orange', linewidth=2)
+        
+        # Signals
+        buy_signals = df[df['signal'] == 1]
+        if not buy_signals.empty:
+            ax.scatter(buy_signals['Open Time'], buy_signals['Close'], 
+                       marker='^', color="#088B08", s=150, edgecolors='black', label='Buy', zorder=5)
+        
+        sell_signals = df[df['signal'] == -1]
+        if not sell_signals.empty:
+            ax.scatter(sell_signals['Open Time'], sell_signals['Close'], 
+                       marker='v', color='red', s=150, edgecolors='black', label='Sell', zorder=5)
+        
+        ax.set_title('Strategy Analysis: Price vs Indicators')
+        ax.set_ylabel('Price')
+        ax.legend(loc='upper left')
+        ax.grid(True, alpha=0.2)
 
-ax2.set_ylabel('Bandwidth')
-ax2.set_xlabel('Close Time (Bangkok)')
-ax2.fill_between(df['close_time_local'], df['bandwidth'], 0, color='tab:blue', alpha=0.1)
-ax2.legend(loc='upper left')
-ax2.grid(True, linestyle='--', alpha=0.3)
+    elif plot_type == 'rsi':
+        ax.plot(df['Open Time'], df['rsi'], color='purple', linewidth=1.5, label='RSI')
+        ax.axhline(70, color='red', linestyle='--', alpha=0.5)
+        ax.axhline(30, color='green', linestyle='--', alpha=0.5)
+        ax.axhline(50, color='gray', linestyle=':', alpha=0.5)
+        ax.set_ylabel('RSI')
+        ax.set_ylim(0, 100)
+        ax.grid(True, alpha=0.2)
 
-plt.xticks(rotation=45)
+    elif plot_type == 'bandwidth':
+        ax.plot(df['Open Time'], df['bandwidth'], color='teal', linewidth=1.5, label='Bandwidth')
+        ax.axhline(BANDWIDTH_THRESHOLD, color='red', linestyle='--', linewidth=1.5, label=f'Threshold ({BANDWIDTH_THRESHOLD})')
+        ax.set_ylabel('Bandwidth')
+        ax.grid(True, alpha=0.2)
+        ax.legend(loc='upper left')
+
+    elif plot_type == 'volume':
+        vol_colors = ['green' if c >= o else 'red' for c, o in zip(df['Close'], df['Open'])]
+        ax.bar(df['Open Time'], df['Volume'], color=vol_colors, alpha=0.5, width=width)
+        ax.set_ylabel('Volume')
+        ax.grid(True, alpha=0.2)
+        
+        # Format X-axis
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+        fig.autofmt_xdate()
+
 plt.tight_layout()
+plt.savefig('kama_rsi_bandwidth_analysis.png')
 plt.show()

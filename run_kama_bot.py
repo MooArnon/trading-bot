@@ -50,6 +50,10 @@ def main():
             logger=logger,
             check_volatility = True,
             bandwidth_threshold = config['BANDWIDTH_THRESHOLD'],
+            signal_type = [
+                'KAMA', 
+                # 'RSI',
+            ],
         )
         try:
             running_live(

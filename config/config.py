@@ -12,4 +12,4 @@ config['BINANCE_API_KEY'] = secrets_dict['BINANCE_API_KEY']
 config['BINANCE_SECRET_KEY'] = secrets_dict['BINANCE_SECRET_KEY']
 config['LEVERAGE'] = int(os.environ["LEVERAGE"])
 
-config['BANDWIDTH_THRESHOLD'] = float(os.getenv("BANDWIDTH_THRESHOLD", 0.01)) 
+config['BANDWIDTH_THRESHOLD'] = float(os.getenv("BANDWIDTH_THRESHOLD", 0.003)) 
