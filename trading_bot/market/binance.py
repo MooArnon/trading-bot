@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 import math
 import traceback
 import requests
-import time
 import hmac
 import hashlib
 from urllib.parse import urlencode
@@ -17,6 +16,7 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
 from .__base import BaseMarket
+from util.cloud_watch import send_trading_signal
 
 ###########
 # Classes #
@@ -326,6 +326,7 @@ class BinanceMarket(BaseMarket):
                     price=price,
                     timeInForce=Client.TIME_IN_FORCE_GTC,
                 )
+                send_trading_signal(symbol, 'LONG', logger=self.logger)
                 self.notify_object.sent_message("Placed LONG order")
             elif position_type == 'SHORT':
                 market_order = self.client.futures_create_order(
@@ -336,6 +337,7 @@ class BinanceMarket(BaseMarket):
                     price=price,
                     timeInForce=Client.TIME_IN_FORCE_GTC,
                 )
+                send_trading_signal(symbol, 'SHORT', logger=self.logger)
                 self.notify_object.sent_message("Placed SHORT order")
             self.logger.info(f"Market order placed: {market_order}")
             
