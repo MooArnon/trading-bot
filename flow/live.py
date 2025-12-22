@@ -5,7 +5,6 @@
 import datetime
 import random
 
-import requests
 import pandas as pd
 from binance.helpers import round_step_size
 from binance.client import Client
