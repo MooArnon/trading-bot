@@ -7,6 +7,7 @@ import time
 def send_trading_signal(
         symbol: str, 
         signal_type: str, 
+        bot_type: str,
         logger=None,
         region_name: str='ap-southeast-1',
 ):
@@ -38,7 +39,11 @@ def send_trading_signal(
                         {
                             'Name': 'Action',
                             'Value': signal_type  # This splits data into LONG vs SHORT lines
-                        }
+                        },
+                        {
+                            'Name': 'BotType',
+                            'Value': bot_type  # This splits data into LONG vs SHORT lines
+                        },
                     ],
                     'Value': 1,  # Count this as 1 event
                     'Unit': 'Count',

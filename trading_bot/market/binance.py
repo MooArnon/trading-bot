@@ -119,7 +119,7 @@ class BinanceMarket(BaseMarket):
     
     ##########################################################################
     
-    def open_order_flow(self, signal: str) -> None:
+    def open_order_flow(self, signal: str, bot_type: str) -> None:
         """
         """
         self.logger.info("Open order flow initialized")
@@ -152,6 +152,7 @@ class BinanceMarket(BaseMarket):
                         tp_percent=self.tp_percent,
                         sl_percent=self.sl_percent,
                         leverage=self.leverage,
+                        bot_type=bot_type
                     )
             
         except Exception as e:
@@ -250,6 +251,7 @@ class BinanceMarket(BaseMarket):
             tp_percent: float, 
             sl_percent: float,
             leverage: int,
+            bot_type: str,
     ) -> None:
         """Create order using current price.
         
@@ -326,7 +328,7 @@ class BinanceMarket(BaseMarket):
                     price=price,
                     timeInForce=Client.TIME_IN_FORCE_GTC,
                 )
-                send_trading_signal(symbol, 'LONG', logger=self.logger)
+                send_trading_signal(symbol, 'LONG', bot_type, logger=self.logger)
                 self.notify_object.sent_message("Placed LONG order")
             elif position_type == 'SHORT':
                 market_order = self.client.futures_create_order(
@@ -337,7 +339,7 @@ class BinanceMarket(BaseMarket):
                     price=price,
                     timeInForce=Client.TIME_IN_FORCE_GTC,
                 )
-                send_trading_signal(symbol, 'SHORT', logger=self.logger)
+                send_trading_signal(symbol, 'SHORT', bot_type, logger=self.logger)
                 self.notify_object.sent_message("Placed SHORT order")
             self.logger.info(f"Market order placed: {market_order}")
             
