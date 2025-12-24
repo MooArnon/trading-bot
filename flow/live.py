@@ -17,7 +17,12 @@ from trading_bot.market.__base import BaseMarket
 # Flows #
 ##############################################################################
 
-def running_live(bot: BaseBot, market: BaseMarket, logger, grain: str = '1m') -> None:
+def running_live(
+        bot: BaseBot, 
+        market: BaseMarket, 
+        logger, grain: str = '1m',
+        get_data_limit: int = 30,
+) -> None:
     current_time = datetime.datetime.now(tz=datetime.timezone.utc)
     logger.info(f"Starting live mode at {current_time}")
     try:
@@ -36,6 +41,12 @@ def running_live(bot: BaseBot, market: BaseMarket, logger, grain: str = '1m') ->
             timestamp_truncated = truncate_to_1_minute(
                 timestamp_step
             )
+        elif grain == "15m":
+            # Truncate to nearest 15 minutes
+            minute = (timestamp_step.minute // 15) * 15
+            timestamp_truncated = timestamp_step.replace(
+                minute=minute, second=0, microsecond=0
+            )
 
         # 3. Format and print the timestamp
         # %S handles the leading zero (e.g., 5 becomes '05')
@@ -52,22 +63,27 @@ def running_live(bot: BaseBot, market: BaseMarket, logger, grain: str = '1m') ->
         data: pd.DataFrame = bot.get_data(
             symbol=bot.symbol, 
             target_date=timestamp_truncated, 
+            limit =get_data_limit,
         )
         
-        feature = bot.transform(
-            data=data
-        )
-        
-        signal = bot.generate_signal(
-            df=feature
+        signal = int(
+                bot.generate_signal(
+                df=data
+            )
         )
 
         signal_mapper = bot.get_signal_mapper()
-        signal = signal_mapper[signal.iloc[-1]['signal']]
-        logger.info(f"Price is {data['Close'].iloc[-1]} | KAMA : {data['KAMA'].iloc[-1]}| Signal: {signal}")
+        
+        if isinstance(signal, pd.DataFrame):
+            signal = signal_mapper[signal.iloc[-1]['signal']]
+        elif isinstance(signal, int):
+            signal = signal_mapper[signal]
+        else:
+            raise ValueError("Invalid signal type returned from bot.generate_signal")
         
         market.open_order_flow(
             signal=signal,
+            bot_type=bot.bot_type
         )
         
     except KeyboardInterrupt:

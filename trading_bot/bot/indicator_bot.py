@@ -19,6 +19,7 @@ from trading_bot.util.logger import get_utc_logger
 ##############################################################################
 
 class IndicatorBot(BinanceBot):
+    bot_type="IndicatorBot"
     kline_columns = [
         'Open Time', 'Open', 'High', 'Low', 'Close', 'Volume', 
         'Close Time', 'Quote Asset Volume', 'Number of Trades', 
@@ -163,9 +164,14 @@ class IndicatorBot(BinanceBot):
         
     ##########################################################################
     
-    def generate_signal(self, df: pd.DataFrame) -> pd.DataFrame:
+    def generate_signal(
+            self, 
+            df: pd.DataFrame,
+    ) -> pd.DataFrame:
         # 1. Initialize a "combined_signal" column with 0s
         df = df.copy()
+        df = self.transform(df)
+        
         df['combined_signal'] = 0
         
         # 2. Check for KAMA
