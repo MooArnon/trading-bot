@@ -76,8 +76,12 @@ def running_live(
             signal = signal_mapper[signal.iloc[-1]['signal']]
         elif isinstance(signal, str):
             signal = signal_mapper[int(signal)]
+        elif isinstance(signal, int):
+            signal = signal_mapper[signal]
         else:
-            raise ValueError("Invalid signal type returned from bot.generate_signal")
+            raise ValueError(
+                f"Invalid signal type returned from bot.generate_signal {signal} with type {type(signal)}"
+            )
         
         market.open_order_flow(
             signal=signal,
