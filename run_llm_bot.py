@@ -73,7 +73,7 @@ def main():
 # Run #
 ##############################################################################
 
-schedule.every(3600).seconds.do(main)
+schedule.every(60 * 15).seconds.do(main)
 
 if __name__ == "__main__":
     main()
