@@ -74,7 +74,7 @@ def running_live(
         
         if isinstance(signal, pd.DataFrame):
             signal = signal_mapper[signal.iloc[-1]['signal']]
-        elif isinstance(signal, int):
+        elif isinstance(signal, str):
             signal = signal_mapper[int(signal)]
         else:
             raise ValueError("Invalid signal type returned from bot.generate_signal")
