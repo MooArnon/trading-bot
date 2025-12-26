@@ -75,208 +75,255 @@ class LLMBot(BinanceBot):
     ) -> str:
         self.logger.info("Generating text promt for LLM...")
         """
-        Takes a DataFrame with OHLCV data, calculates indicators, 
-        and returns a structured prompt for the LLM.
+        Builds the enhanced prompt for the VERY LAST row in the dataframe.
         """
-
-        # ---------------------------------------------------------
-        # 1. CALCULATE INDICATORS
-        # ---------------------------------------------------------
-        # Ensure we are working with a copy to avoid SettingWithCopy warnings
-        df = df.copy()
-        # 1. Convert columns to numeric types immediately after creating the DataFrame
-        cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+        df = self.prepare_market_data(df)
+        # Get the latest row index
+        idx = df.index[-1]
+        curr = df.iloc[idx]
+        prev = df.iloc[idx-1]
         
-        df['timestamp'] = pd.to_datetime(df['Open Time'], unit='ms') 
-        df.set_index('timestamp', inplace=True)
-
-        # This converts the columns to float numbers. 
-        # errors='coerce' turns un-parseable text into NaN (prevents crashing)
-        for col in cols:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-
-        # Trend: EMAs
-        df['EMA_9'] = ta.ema(df['Close'], length=9)
-        df['EMA_21'] = ta.ema(df['Close'], length=21)
-        df['EMA_50'] = ta.ema(df['Close'], length=50)
-        df['EMA_200'] = ta.ema(df['Close'], length=200)
-
-        # Trend Strength: ADX
-        adx = ta.adx(df['High'], df['Low'], df['Close'], length=14)
-        df['ADX'] = adx['ADX_14']
-
-        # Momentum: RSI & MACD
-        df['RSI'] = ta.rsi(df['Close'], length=14)
-        macd = ta.macd(df['Close'])
-        df['MACD_Line'] = macd['MACD_12_26_9']
-        df['MACD_Signal'] = macd['MACDs_12_26_9']
-        df['MACD_Hist'] = macd['MACDh_12_26_9']
-
-        # Volatility: Bollinger Bands & ATR
-        bb = ta.bbands(df['Close'], length=20, std=2)
-
-        df['BB_Lower'] = bb.iloc[:, 0] 
-        df['BB_Upper'] = bb.iloc[:, 2]
-        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-
-        # Volume: VWAP & Volume SMA
-        # Note: VWAP usually requires a datetime index, here we use a simple approximation or standard calculation
-        df['VWAP'] = ta.vwap(df['High'], df['Low'], df['Close'], df['Volume'])
-        df['Vol_SMA'] = ta.sma(df['Volume'], length=20)
-
-        # ---------------------------------------------------------
-        # 2. GET LATEST DATA POINT
-        # ---------------------------------------------------------
-        # We take the last completed candle (iloc[-1])
-        # If you are running this on a live "forming" candle, be careful as values change.
-        current = df.iloc[-1]
-
-        # ---------------------------------------------------------
-        # 3. INTERPRETATION LOGIC (The "Reasoning" Layer)
-        # ---------------------------------------------------------
-
-        # Trend Analysis
-        trend_long = "BULLISH" if current['Close'] > current['EMA_200'] else "BEARISH"
-        trend_short = "BULLISH" if current['EMA_9'] > current['EMA_21'] else "BEARISH"
-
-        adx_strength = "WEAK/RANGING"
-        if current['ADX'] > 25: 
-            adx_strength = "STRONG"
-        if current['ADX'] > 50: 
-            adx_strength = "VERY STRONG"
-
-        # Momentum Analysis
-        rsi_state = "NEUTRAL"
-        if current['RSI'] > 70: 
-            rsi_state = "OVERBOUGHT"
-        elif current['RSI'] < 30: 
-            rsi_state = "OVERSOLD"
-
-        macd_state = "BULLISH" if current['MACD_Hist'] > 0 else "BEARISH"
-
-        # Volatility Analysis
-        bb_status = "INSIDE BANDS"
-        if current['Close'] >= current['BB_Upper']: 
-            bb_status = "TOUCHING UPPER BAND (Possible Reversal/Breakout)"
-        elif current['Close'] <= current['BB_Lower']:
-            bb_status = "TOUCHING LowER BAND (Possible Reversal/Breakout)"
-
-        # Volume Analysis
-        vol_status = "NORMAL"
-        if current['Volume'] > (current['Vol_SMA'] * 1.5): 
-            vol_status = "High (1.5x Avg)"
-        elif current['Volume'] < (current['Vol_SMA'] * 0.5): 
-            vol_status = "Low"
-
-        # ---------------------------------------------------------
-        # 4. CONSTRUCT THE PROMPT
-        # ---------------------------------------------------------
+        # 1. Pre-calculate subjective logic to save LLM brainpower
+        trend_short = "UP" if curr['EMA_9'] > curr['EMA_21'] else "DOWN"
+        trend_long = "BULLISH" if curr['Close'] > curr['EMA_200'] else "BEARISH"
+        
+        macd_momentum = "Building" if abs(curr['MACD_Hist']) > abs(prev['MACD_Hist']) else "Fading"
+        macd_signal = "Bullish" if curr['MACD_Hist'] > 0 else "Bearish"
+        
+        # Distance from EMA 200 (Mean Reversion Check)
+        dist_ema200 = ((curr['Close'] - curr['EMA_200']) / curr['EMA_200']) * 100
+        
+        # Get History Context
+        history_context = self.get_recent_price_action(df, idx, lookback=3)
+        
+        # 2. Build the Prompt
         prompt = f"""
-You are an expert crypto trading bot specializing in 15-minute timeframe scalping for ADA/USDT.
-Analyze the folLowing technical data and provide a trading signal. You will use this signal to make real trades with leverage = {config['LEVERAGE']}.
-The goal is to maximize profits.
+You are an expert Crypto Scalper specializing in ADA/USDT 15m timeframe.
+Your goal is to identify high-probability setups using Trend Following or Mean Reversion.
 
-### 1. MARKET DATA
-- **Current Price:** {current['Close']:.4f}
-- **Volume:** {current['Volume']:.0f} ({vol_status})
-- **ATR (Volatility):** {current['ATR']:.4f}
+### 1. MARKET CONTEXT (Sequence of Events)
+The last 3 completed candles before the current moment:
+{history_context}
 
-### 2. TREND ANALYSIS
-- **Long-Term Trend (EMA 200):** {trend_long} (Price is {"above" if current['Close'] > current['EMA_200'] else "beLow"} EMA 200)
-- **Short-Term Trend (EMA 9/21):** {trend_short}
-- **Trend Strength (ADX):** {current['ADX']:.2f} ({adx_strength})
+### 2. LIVE SNAPSHOT (Current Candle)
+- **Price:** {curr['Close']:.4f}
+- **Volume:** {curr['Volume']:.0f} (Previous: {prev['Volume']:.0f})
+- **ATR (Volatility):** {curr['ATR']:.4f}
 
-### 3. MOMENTUM & OSCILLATORS
-- **RSI (14):** {current['RSI']:.2f} ({rsi_state})
-- **MACD:** {macd_state} (Histogram: {current['MACD_Hist']:.5f})
+### 3. TECHNICAL INDICATORS
+- **Trend Status:**
+- Short-term (9/21 EMA): {trend_short}
+- Long-term (200 EMA): {trend_long} (Price is {dist_ema200:.2f}% away from EMA200)
 
-### 4. DYNAMIC SUPPORT/RESISTANCE
-- **Bollinger Bands:** {bb_status}
-    - Upper: {current['BB_Upper']:.4f}
-    - Lower: {current['BB_Lower']:.4f}
-- **VWAP:** {current['VWAP']:.4f} (Price is {"ABOVE" if current['Close'] > current['VWAP'] else "BELow"} VWAP)
+- **Momentum:**
+- RSI (14): {curr['RSI']:.2f} (Overbought > 70, Oversold < 30)
+- MACD: {macd_signal} signal, Momentum is {macd_momentum} (Hist: {curr['MACD_Hist']:.5f})
 
-### INSTRUCTIONS
-Based on the data above, generate a JSON response in the folLowing format:
-- signal: "1" for LONG, "-1" for SHORT, "0" for HOLD
-- reasoning: must be short like not more thatn 200 words
+- **Structure (Bollinger Bands):**
+- Bandwidth: {curr['BB_Width']:.4f} (Low = Squeeze/Breakout pending, High = Volatile)
+- Position: Price is {"Near Upper Band" if curr['Close'] > curr['BB_Upper']*0.995 else ("Near Lower Band" if curr['Close'] < curr['BB_Lower']*1.005 else "Middle")}
+
+### 4. TRADING RULES (Strict)
+1. **LONG Criteria:** Trend is Bullish OR Price is at Lower BB (Reversion). RSI is rising.
+2. **SHORT Criteria:** Trend is Bearish OR Price is at Upper BB (Reversion). RSI is falling.
+3. **NO TRADE:** If market is flat (RSI 45-55, Low BB Width) or signals conflict (e.g., Price > EMA200 but MACD is bearish).
+
+### TASK
+Perform a "Chain of Thought" analysis. First, analyze the **sequence** of the last 3 candles combined with current indicators. Then output the JSON.
+
+**OUTPUT FORMAT (JSON ONLY):**
 {{
-    "signal": "1" or "0" or "-1",
+    "analysis_thought_process": "Analyze price action, volume, and indicators here...",
+    "signal": "1" (LONG), "-1" (SHORT), or "0" (HOLD),
     "confidence": 0-100,
-    "reasoning": "Concise explanation referencing specific indicators.",
+    "reasoning": "Under 20 words summary."
 }}
-    """
+"""
         return prompt
 
     ##########################################################################
     
+    def prepare_market_data(self, df):
+        """
+        Takes raw kline list from Binance and returns a DataFrame with indicators.
+        """
+        # 1. Convert Types (Binance API returns strings)
+        numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+        df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, axis=1)
+        df['Open Time'] = pd.to_datetime(df['Open Time'], unit='ms')
+        
+        # 2. Calculate Indicators (Pandas TA)
+        # Trend
+        df['EMA_9'] = ta.ema(df['Close'], length=9)
+        df['EMA_21'] = ta.ema(df['Close'], length=21)
+        df['EMA_200'] = ta.ema(df['Close'], length=200)
+        
+        # Momentum
+        df['RSI'] = ta.rsi(df['Close'], length=14)
+        macd = ta.macd(df['Close'])
+        df['MACD'] = macd['MACD_12_26_9']
+        df['MACD_Hist'] = macd['MACDh_12_26_9'] # Histogram
+        
+        # Volatility
+        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+        
+        # Calculate Bollinger Bands
+        bb = ta.bbands(df['Close'], length=20, std=2)
+        
+        # METHOD 1: Join everything automatically (Safe & Easy)
+        df = pd.concat([df, bb], axis=1)
+        
+        # METHOD 2: Rename columns to standard names so your Prompt logic always works
+        # This finds the column ending in 'BBU...' regardless of the numbers
+        bbu_col = [c for c in bb.columns if c.startswith('BBU')][0]
+        bbl_col = [c for c in bb.columns if c.startswith('BBL')][0]
+        bbw_col = [c for c in bb.columns if c.startswith('BBB')][0] # Bandwidth is already calculated!
+        
+        # Map them to simple names for your logic
+        df['BB_Upper'] = bb[bbu_col]
+        df['BB_Lower'] = bb[bbl_col]
+        df['BB_Width'] = bb[bbw_col] # Use the library's calculation
+            
+        return df
+    
+    ##########################################################################
+    
+    def get_recent_price_action(self, df, current_index, lookback=3):
+        """
+        Creates a text summary of the last N candles to give the LLM context of flow.
+        """
+        summary = []
+        # Loop backwards from current_index - 1
+        start_idx = max(0, current_index - lookback)
+        subset = df.iloc[start_idx:current_index]
+        
+        for i, row in subset.iterrows():
+            # Determine candle color
+            color = "GREEN" if row['Close'] > row['Open'] else "RED"
+            
+            # Calculate body size vs wicks (simple pattern detection context)
+            body_size = abs(row['Close'] - row['Open'])
+            total_range = row['High'] - row['Low']
+            wick_ratio = (total_range - body_size) / total_range if total_range > 0 else 0
+            
+            shape = "Normal"
+            if wick_ratio > 0.6: 
+                shape = "Indecision/Doji"
+            if body_size > row['ATR']:
+                shape = "Big Momentum"
+            
+            summary.append(
+                f"- T-{current_index - i}: {color} Candle. "
+                f"Close: {row['Close']:.4f}, Vol: {row['Volume']:.0f}, Shape: {shape}"
+            )
+        
+        return "\n".join(summary)
+    
+    ##########################################################################
+    
     def get_image(self, df: pd.DataFrame) -> bytes:
-        self.logger.info("Generating image for LLM...")
+        self.logger.info("Generating Sniper Chart for LLM...")
         
-        # Working with a copy ensures we don't mess up the main dataframe
-        plot_df = df.copy() 
+        # 1. SLICE DATA: Critical for LLM to see candle shapes. 
+        # taking last 60 candles (approx 15 hours of data on 15m)
+        plot_df = df.iloc[-60:].copy() 
         
+        # Ensure numerics
         cols = ['Open', 'High', 'Low', 'Close', 'Volume']
         for col in cols:
             plot_df[col] = pd.to_numeric(plot_df[col], errors='coerce')
             
-        # 1. Setup the Plot
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), gridspec_kw={'height_ratios': [3, 1]})
- 
-        # -------------------------------------------------------
-        # TOP CHART: Price + Trends (EMA/BB)
-        # -------------------------------------------------------
-        ax1.plot(plot_df.index, plot_df['Close'], label='Price', color='black', linewidth=1.5)
- 
-        # A. Add EMAs (Visual Trend Context) - CRITICAL FOR LLM
-        # Check if they exist, or calculate them on the fly for the plot
-        if 'EMA_50' not in plot_df.columns:
-            plot_df['EMA_50'] = ta.ema(plot_df['Close'], length=50)
-        if 'EMA_200' not in plot_df.columns:
-            plot_df['EMA_200'] = ta.ema(plot_df['Close'], length=200)
+        # 2. Setup Figure with 3 Subplots (Price, MACD, RSI)
+        # Height Ratios: 3 parts Price, 1 part MACD, 1 part RSI
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 10), gridspec_kw={'height_ratios': [3, 1, 1]})
 
-        # Plot them with distinct colors
-        ax1.plot(plot_df.index, plot_df['EMA_50'], color='orange', linewidth=1, label='EMA 50')
-        ax1.plot(plot_df.index, plot_df['EMA_200'], color='blue', linewidth=1, label='EMA 200')
-
-        # B. Bollinger Bands (Visual Volatility)
-        if 'BB_Upper' in plot_df.columns:
-            ax1.plot(plot_df.index, plot_df['BB_Upper'], color='green', linestyle='--', alpha=0.3)
-            ax1.plot(plot_df.index, plot_df['BB_Lower'], color='red', linestyle='--', alpha=0.3)
+        # -------------------------------------------------------
+        # TOP CHART: Price + Bands + EMAs + Candles
+        # -------------------------------------------------------
+        
+        # A. Bollinger Bands (Background Context)
+        # Check if they exist, otherwise calc (assuming standard names or calc on fly)
+        if 'BB_Upper' in plot_df.columns and 'BB_Lower' in plot_df.columns:
             ax1.fill_between(plot_df.index, plot_df['BB_Upper'], plot_df['BB_Lower'], color='gray', alpha=0.1)
- 
-        ax1.set_title("ADA/USDT Price Action (15m)")
+            ax1.plot(plot_df.index, plot_df['BB_Upper'], color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+            ax1.plot(plot_df.index, plot_df['BB_Lower'], color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+
+        # B. EMAs (Aligning with your Prompt: 9/21/200)
+        # We plot 21 (Short Trend) and 200 (Long Trend) to avoid clutter
+        if 'EMA_21' not in plot_df.columns: plot_df['EMA_21'] = ta.ema(plot_df['Close'], length=21)
+        if 'EMA_200' not in plot_df.columns: plot_df['EMA_200'] = ta.ema(plot_df['Close'], length=200)
+        
+        ax1.plot(plot_df.index, plot_df['EMA_21'], color='orange', linewidth=1.5, label='EMA 21 (Short Trend)')
+        ax1.plot(plot_df.index, plot_df['EMA_200'], color='blue', linewidth=2, label='EMA 200 (Long Trend)')
+
+        # C. DRAW CANDLES (Manual drawing to avoid mplfinance dependency)
+        # This loop is fast for 60 items
+        width = .6
+        width2 = .1
+        up = plot_df[plot_df.Close >= plot_df.Open]
+        down = plot_df[plot_df.Close < plot_df.Open]
+        
+        # Draw Up Candles (Green)
+        if not up.empty:
+            ax1.bar(up.index, up.Close - up.Open, width, bottom=up.Open, color='green', alpha=0.8)
+            ax1.bar(up.index, up.High - up.Close, width2, bottom=up.Close, color='green', alpha=0.8)
+            ax1.bar(up.index, up.Low - up.Open, width2, bottom=up.Open, color='green', alpha=0.8)
+
+        # Draw Down Candles (Red)
+        if not down.empty:
+            ax1.bar(down.index, down.Close - down.Open, width, bottom=down.Open, color='red', alpha=0.8)
+            ax1.bar(down.index, down.High - down.Open, width2, bottom=down.Open, color='red', alpha=0.8)
+            ax1.bar(down.index, down.Low - down.Close, width2, bottom=down.Close, color='red', alpha=0.8)
+
+        ax1.set_title(f"ADA/USDT Sniper View (Last {len(plot_df)} candles)")
         ax1.set_ylabel("Price")
         ax1.grid(True, alpha=0.2)
-        ax1.legend(loc='upper left') # Keep legend out of the way
- 
+        ax1.legend(loc='upper left')
+
         # -------------------------------------------------------
-        # BOTTOM CHART: Momentum (RSI Only)
+        # MIDDLE CHART: MACD (New!)
+        # -------------------------------------------------------
+        # Ensure MACD exists
+        if 'MACD' not in plot_df.columns or 'MACD_Hist' not in plot_df.columns:
+            macd = ta.macd(plot_df['Close'])
+            plot_df['MACD'] = macd['MACD_12_26_9']
+            plot_df['MACD_Hist'] = macd['MACDh_12_26_9']
+
+        # Colorize Histogram
+        colors = ['green' if v >= 0 else 'red' for v in plot_df['MACD_Hist']]
+        ax2.bar(plot_df.index, plot_df['MACD_Hist'], color=colors, alpha=0.5)
+        ax2.plot(plot_df.index, plot_df['MACD'], color='blue', linewidth=1, label='MACD Line')
+        ax2.axhline(0, color='black', linewidth=0.5, alpha=0.5)
+        ax2.set_ylabel("MACD")
+        ax2.grid(True, alpha=0.2)
+        ax2.legend(loc='upper left', fontsize='small')
+
+        # -------------------------------------------------------
+        # BOTTOM CHART: RSI
         # -------------------------------------------------------
         if 'RSI' not in plot_df.columns:
             plot_df['RSI'] = ta.rsi(plot_df['Close'], length=14)
- 
-        ax2.plot(plot_df.index, plot_df['RSI'], label='RSI (14)', color='purple')
-        ax2.axhline(70, color='red', linestyle='--', alpha=0.5)
-        ax2.axhline(30, color='green', linestyle='--', alpha=0.5)
-        ax2.set_title("RSI Momentum")
-        ax2.set_ylabel("RSI")
-        ax2.set_ylim(0, 100)
-        ax2.grid(True, alpha=0.2)
+
+        ax3.plot(plot_df.index, plot_df['RSI'], label='RSI (14)', color='purple')
+        ax3.axhline(70, color='red', linestyle='--', alpha=0.5)
+        ax3.axhline(30, color='green', linestyle='--', alpha=0.5)
+        ax3.fill_between(plot_df.index, 70, 30, color='purple', alpha=0.05) # "Safe Zone" shading
+        ax3.set_ylabel("RSI")
+        ax3.set_ylim(0, 100)
+        ax3.grid(True, alpha=0.2)
         
-        # REMOVED plt.show() - This blocks code execution!
- 
-        # 4. Save plot to buffer
-        buf = io.BytesIO()
         plt.tight_layout()
-        plt.savefig(buf, format='png', dpi=100)
+
+        # 4. Save to buffer
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=100) # dpi=100 is good for LLM vision
         plt.close(fig) 
- 
+
         # 5. Convert to Base64
         buf.seek(0)
         image_base64 = base64.b64encode(buf.read()).decode('utf-8')
         return image_base64
-         
+    
     ##########################################################################
     
     def generate_signal(
@@ -301,7 +348,13 @@ Based on the data above, generate a JSON response in the folLowing format:
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are a professional crypto scalper. Analyze the chart pattern and technical data. Return a JSON with signal [1,0,-1] (LONG/HOLD/SHORT) and reasoning."
+                    "content": (
+                        "You are a professional crypto scalper using a multimodel approach. "
+                        "1. Cross-reference the textual indicators with the visual chart data. "
+                        "2. If the text says 'Downtrend' but the chart shows 'Uptrend', lower your confidence. "
+                        "3. Focus heavily on the candlestick shapes in the image for entry timing. "
+                        "Return a JSON with signal [1,0,-1] (LONG/HOLD/SHORT) and reasoning."
+                    )    
                 },
                 {
                     "role": "user",
@@ -343,6 +396,7 @@ Based on the data above, generate a JSON response in the folLowing format:
             
             content_json = json.loads(content)
             self.logger.info(f"LLM Signal: {content_json['signal']}, Confidence: {content_json['confidence']}")
+            self.logger.info(f"LLM Reasoning: {content_json['reasoning']}")
             if content_json["confidence"] < config['LLM_CONFIDENCE_PERCENTAGE_THRESHOLD']:
                 self.logger.warning("Low confidence in signal. Defaulting to HOLD.")
                 return 0
