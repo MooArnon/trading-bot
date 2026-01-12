@@ -27,7 +27,7 @@ class BinanceMarket(BaseMarket):
             self,
             leverage: int,
             logger=None,
-            symbol: str = "ADAUSDT",
+            symbol: str = "ETHUSDT",
             tp_percent=100.0,
             sl_percent=2.0,
             api_key: str = os.environ["BINANCE_API_KEY"],
@@ -691,7 +691,7 @@ class BinanceMarket(BaseMarket):
         Parameters
         ----------
         symbol : str
-            Futures symbol (e.g., "ADAUSDT")
+            Futures symbol (e.g., "ETHUSDT")
         all_positions_data : list
             The full list of position information returned by client.get_position_risk().
 
