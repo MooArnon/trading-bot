@@ -658,7 +658,7 @@ class BinanceNaiveBot(BinanceBot):
         Parameters
         ----------
         symbol : str
-            Futures symbol (e.g., "ADAUSDT")
+            Futures symbol (e.g., "ETHUSDT")
         all_positions_data : list
             The full list of position information returned by client.get_position_risk().
 

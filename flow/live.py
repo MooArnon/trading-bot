@@ -418,10 +418,10 @@ def round_down_to_precision(value, is_quantity=False):
     """
     if is_quantity:
         # BTCUSDT often has 3 decimal places for quantity
-        return float(f"{value:.4f}")
+        return float(f"{value:.2f}")
     else:
         # BTCUSDT often has 2 decimal places for price
-        return float(f"{value:.4f}")
+        return float(f"{value:.2f}")
 
 ##############################################################################
 
@@ -439,7 +439,7 @@ def get_roi(symbol: str, all_positions_data: list) -> float:
         Parameters
         ----------
         symbol : str
-            Futures symbol (e.g., "ADAUSDT")
+            Futures symbol (e.g., "ETHUSDT")
         all_positions_data : list
             The full list of position information returned by client.get_position_risk().
 
